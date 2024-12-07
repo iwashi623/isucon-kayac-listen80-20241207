@@ -455,7 +455,7 @@ func getPopularPlaylistSummaries(ctx context.Context, db connOrTx, userAccount s
 	if err := db.SelectContext(
 		ctx,
 		&popular,
-		`SELECT playlist_id, count(*) AS favorite_count FROM playlist_favorite GROUP BY playlist_id ORDER BY count(*) DESC`,
+		`SELECT playlist_id, count AS favorite_count FROM playlist_favorite_count ORDER BY count DESC`,
 	); err != nil {
 		return nil, fmt.Errorf(
 			"error Select playlist_favorite: %w",
@@ -1529,6 +1529,15 @@ func apiPlaylistDeleteHandler(c echo.Context) error {
 		return errorResponse(c, 500, "internal server error")
 	}
 
+	if _, err := conn.ExecContext(
+		ctx,
+		"DELETE FROM playlist_favorite_count WHERE playlist_id = ?",
+		playlist.ID,
+	); err != nil {
+		c.Logger().Errorf("error Delete playlist_favorite_count by id=%s: %s", playlist.ID, err)
+		return errorResponse(c, 500, "internal server error")
+	}
+
 	body := BasicResponse{
 		Result: true,
 		Status: 200,
@@ -1766,6 +1775,22 @@ func initializeHandler(c echo.Context) error {
 		ctx,
 		"DELETE FROM playlist_favorite WHERE playlist_id NOT IN (SELECT id FROM playlist) OR ? < created_at",
 		lastCreatedAt,
+	); err != nil {
+		c.Logger().Errorf("error: initialize %s", err)
+		return errorResponse(c, 500, "internal server error")
+	}
+
+	if _, err := conn.ExecContext(
+		ctx,
+		"DELETE FROM playlist_favorite_count",
+	); err != nil {
+		c.Logger().Errorf("error: initialize %s", err)
+		return errorResponse(c, 500, "internal server error")
+	}
+
+	if _, err := conn.ExecContext(
+		ctx,
+		"INSERT INTO playlist_favorite_count (`playlist_id`, `count`) SELECT `playlist_id`,count(*) FROM `playlist_favorite` GROUP BY `playlist_id`;",
 	); err != nil {
 		c.Logger().Errorf("error: initialize %s", err)
 		return errorResponse(c, 500, "internal server error")
