@@ -62,7 +62,7 @@ nalp:
 # mysqlのslowlogを見る
 .PHONY: pt
 pt:
-	sudo pt-query-digest /home/isucon/webapp/mysql/slow.log > ~/pt.log
+	sudo pt-query-digest /home/isucon/webapp/mysql/logs/slow.log > ~/pt.log
 
 # pprofを実行する
 .PHONY: pprof
