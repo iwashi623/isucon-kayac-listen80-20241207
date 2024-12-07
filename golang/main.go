@@ -53,6 +53,7 @@ func connectDB() (*sqlx.DB, error) {
 	config.User = getEnv("ISUCON_DB_USER", "isucon")
 	config.Passwd = getEnv("ISUCON_DB_PASSWORD", "isucon")
 	config.DBName = getEnv("ISUCON_DB_NAME", "isucon_listen80")
+	config.InterpolateParams = true
 	config.ParseTime = true
 
 	dsn := config.FormatDSN()
