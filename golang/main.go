@@ -1791,7 +1791,6 @@ func initializeHandler(c echo.Context) error {
 	if _, err := conn.ExecContext(
 		ctx,
 		"INSERT INTO playlist_favorite_count (`playlist_id`, `count`) SELECT `playlist_id`,count(*) FROM `playlist_favorite` GROUP BY `playlist_id`;",
-		lastCreatedAt,
 	); err != nil {
 		c.Logger().Errorf("error: initialize %s", err)
 		return errorResponse(c, 500, "internal server error")
