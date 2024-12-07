@@ -11,7 +11,7 @@ bn:
 # アプリ､nginx､mysqlの再起動
 .PHONY: re
 re:
-	docker-compose up -d --build
+	docker compose up -d --build
 
 # アプリ､nginx､mysqlの再起動
 # .PHONY: re-ssh-db
