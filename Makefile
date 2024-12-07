@@ -46,9 +46,9 @@ mrestart:
 	sudo touch /home/isucon/webapp/mysql/logs/slow.log
 	sudo rm /home/isucon/webapp/mysql/logs/slow.log
 	docker compose restart mysql
-	echo "set global slow_query_log = 1;" |  mysql -h 127.0.0.1 -P 13306 -u root -proot
-	echo "set global slow_query_log_file = '/var/log/mysql/slow.log';" | mysql -h 127.0.0.1 -P 13306 -u root -proot
-	echo "set global long_query_time = 0;" | mysql -h 127.0.0.1 -P 13306 -u root -proot
+	# echo "set global slow_query_log = 1;" |  mysql -h 127.0.0.1 -P 13306 -u root -proot
+	# echo "set global slow_query_log_file = '/var/log/mysql/slow.log';" | mysql -h 127.0.0.1 -P 13306 -u root -proot
+	# echo "set global long_query_time = 0;" | mysql -h 127.0.0.1 -P 13306 -u root -proot
 
 # 分割後のMysqlの再起動(二代目でmrestartを実行する)
 # .PHONY: mrestart
