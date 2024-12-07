@@ -11,43 +11,44 @@ bn:
 # アプリ､nginx､mysqlの再起動
 .PHONY: re
 re:
+	make arestart
+	make nrestart
+	make mrestart
 	docker compose up -d --build
 
 # アプリ､nginx､mysqlの再起動
-# .PHONY: re-ssh-db
-# re-ssh-db:
-# 	make arestart
-# 	make nrestart
-# 	make mrestart
-# # DBを分割した時このコメントアウトをとる。 リフレッシュしたいDBのPrivate IPを指定
-# # ssh 192.168.0.12 -A "cd webapp && make mrestart"
+.PHONY: re-ssh
+re-ssh-db:
+	make arestart
+	make nrestart
+	make mrestart
+# DBを分割した時このコメントアウトをとる。 リフレッシュしたいDBのPrivate IPを指定
+# ssh 192.168.0.12 -A "cd webapp && make mrestart"
 
-# # アプリの再起動
-# .PHONY: arestart
-# arestart:
-# 	sudo systemctl daemon-reload
-# 	sudo systemctl restart ${service}
-# 	sudo systemctl status ${service}
+# アプリの再起動
+.PHONY: arestart
+arestart:
+	# sudo systemctl daemon-reload
+	# sudo systemctl restart ${service}
+	# sudo systemctl status ${service}
 
-# # nginxの再起動
-# .PHONY: nrestart
-# nrestart:
-# 	sudo touch /var/log/nginx/access.log
-# 	sudo rm /var/log/nginx/access.log
-# 	sudo systemctl reload nginx
-# 	sudo systemctl status nginx
+# nginxの再起動
+.PHONY: nrestart
+nrestart:
+	# sudo touch /var/log/nginx/access.log
+	# sudo rm /var/log/nginx/access.log
+	# sudo systemctl reload nginx
+	# sudo systemctl status nginx
 
-# # mysqlの再起動
-# .PHONY: mrestart
-# mrestart:
-# 	sudo touch /var/log/mysql/slow.log
-# 	sudo rm /var/log/mysql/slow.log
-# 	sudo mysqladmin flush-logs -proot
-# 	sudo systemctl restart mysql
-# 	sudo systemctl status mysql
-# 	echo "set global slow_query_log = 1;" | sudo mysql -proot
-# 	echo "set global slow_query_log_file = '/var/log/mysql/slow.log';" | sudo mysql -proot
-# 	echo "set global long_query_time = 0;" | sudo mysql -proot
+# mysqlの再起動
+.PHONY: mrestart
+mrestart:
+	sudo touch /home/isucon/webapp/mysql/logs/slow.log
+	sudo rm /home/isucon/webapp/mysql/logs/slow.log
+	docker compose restart mysql
+	# echo "set global slow_query_log = 1;" |  mysql -h 127.0.0.1 -P 13306 -u root -proot
+	# echo "set global slow_query_log_file = '/var/log/mysql/slow.log';" | mysql -h 127.0.0.1 -P 13306 -u root -proot
+	# echo "set global long_query_time = 0;" | mysql -h 127.0.0.1 -P 13306 -u root -proot
 
 # 分割後のMysqlの再起動(二代目でmrestartを実行する)
 # .PHONY: mrestart
