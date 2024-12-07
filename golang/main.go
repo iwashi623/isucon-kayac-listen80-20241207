@@ -1783,7 +1783,6 @@ func initializeHandler(c echo.Context) error {
 	if _, err := conn.ExecContext(
 		ctx,
 		"DELETE FROM playlist_favorite_count",
-		lastCreatedAt,
 	); err != nil {
 		c.Logger().Errorf("error: initialize %s", err)
 		return errorResponse(c, 500, "internal server error")
