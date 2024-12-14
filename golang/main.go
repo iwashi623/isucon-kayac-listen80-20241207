@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"html/template"
 	"io"
+	"log/slog"
 	"math/rand"
 	"net/http"
 	"os"
@@ -22,6 +23,8 @@ import (
 	"github.com/oklog/ulid/v2"
 	"github.com/srinathgs/mysqlstore"
 	"golang.org/x/crypto/bcrypt"
+
+	_ "net/http/pprof"
 )
 
 const (
@@ -114,14 +117,20 @@ func main() {
 		e.Logger.Fatalf("failed to connect db: %v", err)
 		return
 	}
-	db.SetMaxOpenConns(10)
 	defer db.Close()
+	db.SetMaxOpenConns(25)
+	db.SetMaxIdleConns(25)
 
 	sessionStore, err = mysqlstore.NewMySQLStoreFromConnection(db.DB, "sessions_golang", "/", 86400, []byte("powawa"))
 	if err != nil {
 		e.Logger.Fatalf("failed to initialize session store: %v", err)
 		return
 	}
+
+	go func() {
+		slog.Info("pprof listening on :6060")
+		http.ListenAndServe(":6060", nil)
+	}()
 
 	port := getEnv("SERVER_APP_PORT", "3000")
 	e.Logger.Infof("starting listen80 server on : %s ...", port)

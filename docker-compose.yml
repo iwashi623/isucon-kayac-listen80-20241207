@@ -23,6 +23,9 @@ services:
       ISUCON_DB_USER: isucon
       ISUCON_DB_PASSWORD: isucon
       ISUCON_DB_NAME: isucon_listen80
+    ports:
+      - "3000:3000"
+      - "6060:6060"
     links:
       - mysql
     volumes:
