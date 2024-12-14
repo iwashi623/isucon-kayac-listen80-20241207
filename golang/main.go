@@ -13,6 +13,8 @@ import (
 	"time"
 	"unicode/utf8"
 
+	_ "net/http/pprof"
+
 	"github.com/go-sql-driver/mysql"
 	"github.com/gorilla/sessions"
 	"github.com/jmoiron/sqlx"
@@ -28,6 +30,7 @@ const (
 	publicPath        = "./public"
 	sessionCookieName = "listen80_session_golang"
 	anonUserAccount   = "__"
+	maxConnsInt       = 40
 )
 
 var (
@@ -114,7 +117,9 @@ func main() {
 		e.Logger.Fatalf("failed to connect db: %v", err)
 		return
 	}
-	db.SetMaxOpenConns(10)
+	db.SetMaxOpenConns(maxConnsInt)
+	db.SetMaxIdleConns(maxConnsInt * 2)
+	db.SetConnMaxLifetime(3 * time.Minute)
 	defer db.Close()
 
 	sessionStore, err = mysqlstore.NewMySQLStoreFromConnection(db.DB, "sessions_golang", "/", 86400, []byte("powawa"))
@@ -122,6 +127,11 @@ func main() {
 		e.Logger.Fatalf("failed to initialize session store: %v", err)
 		return
 	}
+
+	go func() {
+		e.Logger.Infof("pprof listening on :6060")
+		http.ListenAndServe(":6060", nil)
+	}()
 
 	port := getEnv("SERVER_APP_PORT", "3000")
 	e.Logger.Infof("starting listen80 server on : %s ...", port)
@@ -356,7 +366,12 @@ func getFavoritesCountByPlaylistID(ctx context.Context, db connOrTx, playlistID 
 	if err := db.GetContext(
 		ctx,
 		&count,
-		"SELECT COUNT(*) AS cnt FROM playlist_favorite where playlist_id = ?",
+		`
+			SELECT IFNULL(
+				(SELECT count FROM playlist_favorite_count WHERE playlist_id = ?),
+				0
+			) AS favorite_count;
+		`,
 		playlistID,
 	); err != nil {
 		return 0, fmt.Errorf(
@@ -676,11 +691,26 @@ func getPlaylistDetailByPlaylistULID(ctx context.Context, db connOrTx, playlistU
 		}
 	}
 
-	var resPlaylistSongs []PlaylistSongRow
+	var resPlaylistSongs []PlaylistSongRowWithSong
 	if err := db.SelectContext(
 		ctx,
 		&resPlaylistSongs,
-		"SELECT * FROM playlist_song WHERE playlist_id = ?",
+		`
+			SELECT
+				playlist_song.*,
+				song.id AS "song.id",
+				song.ulid AS "song.ulid",
+				song.title AS "song.title",
+				song.artist_id AS "song.artist_id",
+				song.album AS "song.album",
+				song.track_number AS "song.track_number",
+				song.is_public AS "song.is_public",
+				artist.name AS "song.artist_name"
+			FROM playlist_song
+			JOIN song ON playlist_song.song_id = song.id
+			JOIN artist ON song.artist_id = artist.id
+			WHERE playlist_id = ?
+		`,
 		playlist.ID,
 	); err != nil {
 		return nil, fmt.Errorf(
@@ -691,33 +721,33 @@ func getPlaylistDetailByPlaylistULID(ctx context.Context, db connOrTx, playlistU
 
 	songs := make([]Song, 0, len(resPlaylistSongs))
 	for _, row := range resPlaylistSongs {
-		var song SongRow
-		if err := db.GetContext(
-			ctx,
-			&song,
-			"SELECT * FROM song WHERE id = ?",
-			row.SongID,
-		); err != nil {
-			return nil, fmt.Errorf("error Get song by id=%d: %w", row.SongID, err)
-		}
+		// var song SongRow
+		// if err := db.GetContext(
+		// 	ctx,
+		// 	&song,
+		// 	"SELECT * FROM song WHERE id = ?",
+		// 	row.SongID,
+		// ); err != nil {
+		// 	return nil, fmt.Errorf("error Get song by id=%d: %w", row.SongID, err)
+		// }
 
-		var artist ArtistRow
-		if err := db.GetContext(
-			ctx,
-			&artist,
-			"SELECT * FROM artist WHERE id = ?",
-			song.ArtistID,
-		); err != nil {
-			return nil, fmt.Errorf("error Get artist by id=%d: %w", song.ArtistID, err)
-		}
+		// var artist ArtistRow
+		// if err := db.GetContext(
+		// 	ctx,
+		// 	&artist,
+		// 	"SELECT * FROM artist WHERE id = ?",
+		// 	song.ArtistID,
+		// ); err != nil {
+		// 	return nil, fmt.Errorf("error Get artist by id=%d: %w", song.ArtistID, err)
+		// }
 
 		songs = append(songs, Song{
-			ULID:        song.ULID,
-			Title:       song.Title,
-			Artist:      artist.Name,
-			Album:       song.Album,
-			TrackNumber: song.TrackNumber,
-			IsPublic:    song.IsPublic,
+			ULID:        row.Song.ULID,
+			Title:       row.Song.Title,
+			Artist:      row.Song.ArtistName,
+			Album:       row.Song.Album,
+			TrackNumber: row.Song.TrackNumber,
+			IsPublic:    row.Song.IsPublic,
 		})
 	}
 
@@ -846,14 +876,14 @@ func apiSignupHandler(c echo.Context) error {
 	signupTimestamp := time.Now()
 
 	ctx := c.Request().Context()
-	conn, err := db.Connx(ctx)
-	if err != nil {
-		c.Logger().Errorf("error db.Conn: %s", err)
-		return errorResponse(c, 500, "failed to signup")
-	}
-	defer conn.Close()
+	// conn, err := db.Connx(ctx)
+	// if err != nil {
+	// 	c.Logger().Errorf("error db.Conn: %s", err)
+	// 	return errorResponse(c, 500, "failed to signup")
+	// }
+	// defer conn.Close()
 
-	if _, err := conn.ExecContext(
+	if _, err := db.ExecContext(
 		ctx,
 		"INSERT INTO user (`account`, `display_name`, `password_hash`, `is_ban`, `created_at`, `last_logined_at`) VALUES (?, ?, ?, ?, ?, ?)",
 		userAccount, displayName, passwordHash, isBan, signupTimestamp, signupTimestamp,
@@ -919,14 +949,14 @@ func apiLoginHandler(c echo.Context) error {
 
 	// password check
 	ctx := c.Request().Context()
-	conn, err := db.Connx(ctx)
-	if err != nil {
-		c.Logger().Errorf("error db.Conn: %s", err)
-		return errorResponse(c, 500, "failed to login (server error)")
-	}
-	defer conn.Close()
+	// conn, err := db.Connx(ctx)
+	// if err != nil {
+	// 	c.Logger().Errorf("error db.Conn: %s", err)
+	// 	return errorResponse(c, 500, "failed to login (server error)")
+	// }
+	// defer conn.Close()
 
-	user, err := getUserByAccount(ctx, conn, userAccount)
+	user, err := getUserByAccount(ctx, db, userAccount)
 	if err != nil {
 		c.Logger().Errorf("error getUserByAccount: %s", err)
 		return errorResponse(c, 500, "failed to login (server error)")
@@ -947,7 +977,7 @@ func apiLoginHandler(c echo.Context) error {
 	}
 
 	now := time.Now()
-	if _, err := conn.ExecContext(
+	if _, err := db.ExecContext(
 		ctx,
 		"UPDATE user SET last_logined_at = ? WHERE account = ?",
 		now, user.Account,
@@ -1020,14 +1050,14 @@ func apiRecentPlaylistsHandler(c echo.Context) error {
 	}
 
 	ctx := c.Request().Context()
-	conn, err := db.Connx(ctx)
-	if err != nil {
-		c.Logger().Errorf("error db.Conn: %s", err)
-		return errorResponse(c, 500, "internal server error")
-	}
-	defer conn.Close()
+	// conn, err := db.Connx(ctx)
+	// if err != nil {
+	// 	c.Logger().Errorf("error db.Conn: %s", err)
+	// 	return errorResponse(c, 500, "internal server error")
+	// }
+	// defer conn.Close()
 
-	playlists, err := getRecentPlaylistSummaries(ctx, conn, userAccount)
+	playlists, err := getRecentPlaylistSummaries(ctx, db, userAccount)
 	if err != nil {
 		c.Logger().Errorf("error getRecentPlaylistSummaries: %s", err)
 		return errorResponse(c, 500, "internal server error")
@@ -1063,15 +1093,15 @@ func apiPopularPlaylistsHandler(c echo.Context) error {
 	}
 
 	ctx := c.Request().Context()
-	conn, err := db.Connx(ctx)
-	if err != nil {
-		c.Logger().Errorf("error db.Conn: %s", err)
-		return errorResponse(c, 500, "internal server error")
-	}
-	defer conn.Close()
+	// conn, err := db.Connx(ctx)
+	// if err != nil {
+	// 	c.Logger().Errorf("error db.Conn: %s", err)
+	// 	return errorResponse(c, 500, "internal server error")
+	// }
+	// defer conn.Close()
 
 	// トランザクションを使わないとfav数の順番が狂うことがある
-	tx, err := conn.BeginTxx(ctx, nil)
+	tx, err := db.BeginTxx(ctx, nil)
 	if err != nil {
 		c.Logger().Errorf("error conn.BeginTxx: %s", err)
 		return errorResponse(c, 500, "internal server error")
@@ -1119,14 +1149,14 @@ func apiPlaylistsHandler(c echo.Context) error {
 	userAccount := _account.(string)
 
 	ctx := c.Request().Context()
-	conn, err := db.Connx(ctx)
-	if err != nil {
-		c.Logger().Errorf("error db.Conn: %s", err)
-		return errorResponse(c, 500, "internal server error")
-	}
-	defer conn.Close()
+	// conn, err := db.Connx(ctx)
+	// if err != nil {
+	// 	c.Logger().Errorf("error db.Conn: %s", err)
+	// 	return errorResponse(c, 500, "internal server error")
+	// }
+	// defer conn.Close()
 
-	createdPlaylists, err := getCreatedPlaylistSummariesByUserAccount(ctx, conn, userAccount)
+	createdPlaylists, err := getCreatedPlaylistSummariesByUserAccount(ctx, db, userAccount)
 	if err != nil {
 		c.Logger().Errorf("error getCreatedPlaylistSummariesByUserAccount: %s", err)
 		return errorResponse(c, 500, "internal server error")
@@ -1134,7 +1164,7 @@ func apiPlaylistsHandler(c echo.Context) error {
 	if createdPlaylists == nil {
 		createdPlaylists = []Playlist{}
 	}
-	favoritedPlaylists, err := getFavoritedPlaylistSummariesByUserAccount(ctx, conn, userAccount)
+	favoritedPlaylists, err := getFavoritedPlaylistSummariesByUserAccount(ctx, db, userAccount)
 	if err != nil {
 		c.Logger().Errorf("error getFavoritedPlaylistSummariesByUserAccount: %s", err)
 		return errorResponse(c, 500, "internal server error")
@@ -1181,14 +1211,14 @@ func apiPlaylistHandler(c echo.Context) error {
 	}
 
 	ctx := c.Request().Context()
-	conn, err := db.Connx(ctx)
-	if err != nil {
-		c.Logger().Errorf("error db.Conn: %s", err)
-		return errorResponse(c, 500, "internal server error")
-	}
-	defer conn.Close()
+	// conn, err := db.Connx(ctx)
+	// if err != nil {
+	// 	c.Logger().Errorf("error db.Conn: %s", err)
+	// 	return errorResponse(c, 500, "internal server error")
+	// }
+	// defer conn.Close()
 
-	playlist, err := getPlaylistByULID(ctx, conn, playlistULID)
+	playlist, err := getPlaylistByULID(ctx, db, playlistULID)
 	if err != nil {
 		c.Logger().Errorf("error getPlaylistByULID:  %s", err)
 		return errorResponse(c, 500, "internal server error")
@@ -1202,7 +1232,7 @@ func apiPlaylistHandler(c echo.Context) error {
 		return errorResponse(c, 404, "playlist not found")
 	}
 
-	playlistDetails, err := getPlaylistDetailByPlaylistULID(ctx, conn, playlist.ULID, &userAccount)
+	playlistDetails, err := getPlaylistDetailByPlaylistULID(ctx, db, playlist.ULID, &userAccount)
 	if err != nil {
 		c.Logger().Errorf("error getPlaylistDetailByPlaylistULID:  %s", err)
 		return errorResponse(c, 500, "internal server error")
@@ -1263,14 +1293,14 @@ func apiPlaylistAddHandler(c echo.Context) error {
 	}
 
 	ctx := c.Request().Context()
-	conn, err := db.Connx(ctx)
-	if err != nil {
-		c.Logger().Errorf("error db.Conn: %s", err)
-		return errorResponse(c, 500, "internal server error")
-	}
-	defer conn.Close()
+	// conn, err := db.Connx(ctx)
+	// if err != nil {
+	// 	c.Logger().Errorf("error db.Conn: %s", err)
+	// 	return errorResponse(c, 500, "internal server error")
+	// }
+	// defer conn.Close()
 
-	if _, err := conn.ExecContext(
+	if _, err := db.ExecContext(
 		ctx,
 		"INSERT INTO playlist (`ulid`, `name`, `user_account`, `is_public`, `created_at`, `updated_at`) VALUES (?, ?, ?, ?, ?, ?)",
 		playlistULID.String(), name, userAccount, false, createTimestamp, createTimestamp, // 作成時は非公開
@@ -1317,15 +1347,15 @@ func apiPlaylistUpdateHandler(c echo.Context) error {
 	userAccount := _account.(string)
 
 	ctx := c.Request().Context()
-	conn, err := db.Connx(ctx)
-	if err != nil {
-		c.Logger().Errorf("error db.Conn: %s", err)
-		return errorResponse(c, 500, "internal server error")
-	}
-	defer conn.Close()
+	// conn, err := db.Connx(ctx)
+	// if err != nil {
+	// 	c.Logger().Errorf("error db.Conn: %s", err)
+	// 	return errorResponse(c, 500, "internal server error")
+	// }
+	// defer conn.Close()
 
 	playlistULID := c.Param("playlistUlid")
-	playlist, err := getPlaylistByULID(ctx, conn, playlistULID)
+	playlist, err := getPlaylistByULID(ctx, db, playlistULID)
 	if err != nil {
 		c.Logger().Errorf("error getPlaylistByULID: %s", err)
 		return errorResponse(c, 500, "internal server error")
@@ -1373,7 +1403,7 @@ func apiPlaylistUpdateHandler(c echo.Context) error {
 
 	updatedTimestamp := time.Now()
 
-	tx, err := conn.BeginTxx(ctx, nil)
+	tx, err := db.BeginTxx(ctx, nil)
 	if err != nil {
 		c.Logger().Errorf("error conn.BeginTxx: %s", err)
 		return errorResponse(c, 500, "internal server error")
@@ -1431,7 +1461,7 @@ func apiPlaylistUpdateHandler(c echo.Context) error {
 		return errorResponse(c, 500, "internal server error")
 	}
 
-	playlistDetails, err := getPlaylistDetailByPlaylistULID(ctx, conn, playlist.ULID, &userAccount)
+	playlistDetails, err := getPlaylistDetailByPlaylistULID(ctx, db, playlist.ULID, &userAccount)
 	if err != nil {
 		c.Logger().Errorf("error getPlaylistDetailByPlaylistULID: %s", err)
 		return errorResponse(c, 500, "internal server error")
@@ -1484,14 +1514,14 @@ func apiPlaylistDeleteHandler(c echo.Context) error {
 	}
 
 	ctx := c.Request().Context()
-	conn, err := db.Connx(ctx)
-	if err != nil {
-		c.Logger().Errorf("error db.Conn: %s", err)
-		return errorResponse(c, 500, "internal server error")
-	}
-	defer conn.Close()
+	// conn, err := db.Connx(ctx)
+	// if err != nil {
+	// 	c.Logger().Errorf("error db.Conn: %s", err)
+	// 	return errorResponse(c, 500, "internal server error")
+	// }
+	// defer conn.Close()
 
-	playlist, err := getPlaylistByULID(ctx, conn, playlistULID)
+	playlist, err := getPlaylistByULID(ctx, db, playlistULID)
 	if err != nil {
 		c.Logger().Errorf("error getPlaylistByULID: %s", err)
 		return errorResponse(c, 500, "internal server error")
@@ -1504,7 +1534,7 @@ func apiPlaylistDeleteHandler(c echo.Context) error {
 		return errorResponse(c, 400, "do not delete other users playlist")
 	}
 
-	if _, err := conn.ExecContext(
+	if _, err := db.ExecContext(
 		ctx,
 		"DELETE FROM playlist WHERE `ulid` = ?",
 		playlist.ULID,
@@ -1512,7 +1542,7 @@ func apiPlaylistDeleteHandler(c echo.Context) error {
 		c.Logger().Errorf("error Delete playlist by ulid=%s: %s", playlist.ULID, err)
 		return errorResponse(c, 500, "internal server error")
 	}
-	if _, err := conn.ExecContext(
+	if _, err := db.ExecContext(
 		ctx,
 		"DELETE FROM playlist_song WHERE playlist_id = ?",
 		playlist.ID,
@@ -1520,7 +1550,7 @@ func apiPlaylistDeleteHandler(c echo.Context) error {
 		c.Logger().Errorf("error Delete playlist_song by id=%s: %s", playlist.ID, err)
 		return errorResponse(c, 500, "internal server error")
 	}
-	if _, err := conn.ExecContext(
+	if _, err := db.ExecContext(
 		ctx,
 		"DELETE FROM playlist_favorite WHERE playlist_id = ?",
 		playlist.ID,
@@ -1529,7 +1559,7 @@ func apiPlaylistDeleteHandler(c echo.Context) error {
 		return errorResponse(c, 500, "internal server error")
 	}
 
-	if _, err := conn.ExecContext(
+	if _, err := db.ExecContext(
 		ctx,
 		"DELETE FROM playlist_favorite_count WHERE playlist_id = ?",
 		playlist.ID,
@@ -1584,14 +1614,14 @@ func apiPlaylistFavoriteHandler(c echo.Context) error {
 	}
 
 	ctx := c.Request().Context()
-	conn, err := db.Connx(ctx)
-	if err != nil {
-		c.Logger().Errorf("error db.Conn: %s", err)
-		return errorResponse(c, 500, "internal server error")
-	}
-	defer conn.Close()
+	// conn, err := db.Connx(ctx)
+	// if err != nil {
+	// 	c.Logger().Errorf("error db.Conn: %s", err)
+	// 	return errorResponse(c, 500, "internal server error")
+	// }
+	// defer conn.Close()
 
-	playlist, err := getPlaylistByULID(ctx, conn, playlistULID)
+	playlist, err := getPlaylistByULID(ctx, db, playlistULID)
 	if err != nil {
 		c.Logger().Errorf("error getPlaylistByULID: %s", err)
 		return errorResponse(c, 500, "internal server error")
@@ -1610,21 +1640,21 @@ func apiPlaylistFavoriteHandler(c echo.Context) error {
 		// insert
 		createdTimestamp := time.Now()
 		playlistFavorite, err := getPlaylistFavoritesByPlaylistIDAndUserAccount(
-			ctx, conn, playlist.ID, userAccount,
+			ctx, db, playlist.ID, userAccount,
 		)
 		if err != nil {
 			c.Logger().Errorf("error getPlaylistFavoritesByPlaylistIDAndUserAccount: %s", err)
 			return errorResponse(c, 500, "internal server error")
 		}
 		if playlistFavorite == nil {
-			if err := insertPlaylistFavorite(ctx, conn, playlist.ID, userAccount, createdTimestamp); err != nil {
+			if err := insertPlaylistFavorite(ctx, db, playlist.ID, userAccount, createdTimestamp); err != nil {
 				c.Logger().Errorf("error insertPlaylistFavorite: %s", err)
 				return errorResponse(c, 500, "internal server error")
 			}
 		}
 	} else {
 		// delete
-		if _, err := conn.ExecContext(
+		if _, err := db.ExecContext(
 			ctx,
 			"DELETE FROM playlist_favorite WHERE `playlist_id` = ? AND `favorite_user_account` = ?",
 			playlist.ID, userAccount,
@@ -1637,7 +1667,7 @@ func apiPlaylistFavoriteHandler(c echo.Context) error {
 		}
 	}
 
-	playlistDetail, err := getPlaylistDetailByPlaylistULID(ctx, conn, playlist.ULID, &userAccount)
+	playlistDetail, err := getPlaylistDetailByPlaylistULID(ctx, db, playlist.ULID, &userAccount)
 	if err != nil {
 		c.Logger().Errorf("error getPlaylistDetailByPlaylistULID: %s", err)
 		return errorResponse(c, 500, "internal server error")
@@ -1686,14 +1716,14 @@ func apiAdminUserBanHandler(c echo.Context) error {
 	isBan := adminPlayerBanRequest.IsBan
 
 	ctx := c.Request().Context()
-	conn, err := db.Connx(ctx)
-	if err != nil {
-		c.Logger().Errorf("error db.Conn: %s", err)
-		return errorResponse(c, 500, "internal server error")
-	}
-	defer conn.Close()
+	// conn, err := db.Connx(ctx)
+	// if err != nil {
+	// 	c.Logger().Errorf("error db.Conn: %s", err)
+	// 	return errorResponse(c, 500, "internal server error")
+	// }
+	// defer conn.Close()
 
-	if _, err := conn.ExecContext(
+	if _, err := db.ExecContext(
 		ctx,
 		"UPDATE user SET `is_ban` = ?  WHERE `account` = ?",
 		isBan, userAccount,
@@ -1701,7 +1731,7 @@ func apiAdminUserBanHandler(c echo.Context) error {
 		c.Logger().Errorf("error Update user by is_ban=%t, account=%s: %s", isBan, userAccount, err)
 		return errorResponse(c, 500, "internal server error")
 	}
-	updatedUser, err := getUserByAccount(ctx, conn, userAccount)
+	updatedUser, err := getUserByAccount(ctx, db, userAccount)
 	if err != nil {
 		c.Logger().Errorf("error getUserByAccount: %s", err)
 		return errorResponse(c, 500, "internal server error")
@@ -1739,13 +1769,13 @@ func initializeHandler(c echo.Context) error {
 	lastCreatedAt := "2022-05-13 09:00:00.000"
 	ctx := c.Request().Context()
 
-	conn, err := db.Connx(ctx)
-	if err != nil {
-		return errorResponse(c, 500, "internal server error")
-	}
-	defer conn.Close()
+	// conn, err := db.Connx(ctx)
+	// if err != nil {
+	// 	return errorResponse(c, 500, "internal server error")
+	// }
+	// defer conn.Close()
 
-	if _, err := conn.ExecContext(
+	if _, err := db.ExecContext(
 		ctx,
 		"DELETE FROM user WHERE ? < `created_at`",
 		lastCreatedAt,
@@ -1754,7 +1784,7 @@ func initializeHandler(c echo.Context) error {
 		return errorResponse(c, 500, "internal server error")
 	}
 
-	if _, err := conn.ExecContext(
+	if _, err := db.ExecContext(
 		ctx,
 		"DELETE FROM playlist WHERE ? < created_at OR user_account NOT IN (SELECT account FROM user)",
 		lastCreatedAt,
@@ -1763,7 +1793,7 @@ func initializeHandler(c echo.Context) error {
 		return errorResponse(c, 500, "internal server error")
 	}
 
-	if _, err := conn.ExecContext(
+	if _, err := db.ExecContext(
 		ctx,
 		"DELETE FROM playlist_song WHERE playlist_id NOT IN (SELECT id FROM playlist)",
 	); err != nil {
@@ -1771,7 +1801,7 @@ func initializeHandler(c echo.Context) error {
 		return errorResponse(c, 500, "internal server error")
 	}
 
-	if _, err := conn.ExecContext(
+	if _, err := db.ExecContext(
 		ctx,
 		"DELETE FROM playlist_favorite WHERE playlist_id NOT IN (SELECT id FROM playlist) OR ? < created_at",
 		lastCreatedAt,
@@ -1780,7 +1810,7 @@ func initializeHandler(c echo.Context) error {
 		return errorResponse(c, 500, "internal server error")
 	}
 
-	if _, err := conn.ExecContext(
+	if _, err := db.ExecContext(
 		ctx,
 		"DELETE FROM playlist_favorite_count",
 	); err != nil {
@@ -1788,7 +1818,7 @@ func initializeHandler(c echo.Context) error {
 		return errorResponse(c, 500, "internal server error")
 	}
 
-	if _, err := conn.ExecContext(
+	if _, err := db.ExecContext(
 		ctx,
 		"INSERT INTO playlist_favorite_count (`playlist_id`, `count`) SELECT `playlist_id`,count(*) FROM `playlist_favorite` GROUP BY `playlist_id`;",
 	); err != nil {
