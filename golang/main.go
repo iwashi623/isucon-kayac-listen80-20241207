@@ -681,11 +681,26 @@ func getPlaylistDetailByPlaylistULID(ctx context.Context, db connOrTx, playlistU
 		}
 	}
 
-	var resPlaylistSongs []PlaylistSongRow
+	var resPlaylistSongs []PlaylistSongRowWithSong
 	if err := db.SelectContext(
 		ctx,
 		&resPlaylistSongs,
-		"SELECT * FROM playlist_song WHERE playlist_id = ?",
+		`
+			SELECT
+				playlist_song.*,
+				song.id AS "song.id",
+				song.ulid AS "song.ulid",
+				song.title AS "song.title",
+				song.artist_id AS "song.artist_id",
+				song.album AS "song.album",
+				song.track_number AS "song.track_number",
+				song.is_public AS "song.is_public",
+				artist.name AS "song.artist_name"
+			FROM playlist_song
+			JOIN song ON playlist_song.song_id = song.id
+			JOIN artist ON song.artist_id = artist.id
+			WHERE playlist_id = ?
+		`,
 		playlist.ID,
 	); err != nil {
 		return nil, fmt.Errorf(
@@ -696,33 +711,33 @@ func getPlaylistDetailByPlaylistULID(ctx context.Context, db connOrTx, playlistU
 
 	songs := make([]Song, 0, len(resPlaylistSongs))
 	for _, row := range resPlaylistSongs {
-		var song SongRow
-		if err := db.GetContext(
-			ctx,
-			&song,
-			"SELECT * FROM song WHERE id = ?",
-			row.SongID,
-		); err != nil {
-			return nil, fmt.Errorf("error Get song by id=%d: %w", row.SongID, err)
-		}
+		// var song SongRow
+		// if err := db.GetContext(
+		// 	ctx,
+		// 	&song,
+		// 	"SELECT * FROM song WHERE id = ?",
+		// 	row.SongID,
+		// ); err != nil {
+		// 	return nil, fmt.Errorf("error Get song by id=%d: %w", row.SongID, err)
+		// }
 
-		var artist ArtistRow
-		if err := db.GetContext(
-			ctx,
-			&artist,
-			"SELECT * FROM artist WHERE id = ?",
-			song.ArtistID,
-		); err != nil {
-			return nil, fmt.Errorf("error Get artist by id=%d: %w", song.ArtistID, err)
-		}
+		// var artist ArtistRow
+		// if err := db.GetContext(
+		// 	ctx,
+		// 	&artist,
+		// 	"SELECT * FROM artist WHERE id = ?",
+		// 	song.ArtistID,
+		// ); err != nil {
+		// 	return nil, fmt.Errorf("error Get artist by id=%d: %w", song.ArtistID, err)
+		// }
 
 		songs = append(songs, Song{
-			ULID:        song.ULID,
-			Title:       song.Title,
-			Artist:      artist.Name,
-			Album:       song.Album,
-			TrackNumber: song.TrackNumber,
-			IsPublic:    song.IsPublic,
+			ULID:        row.Song.ULID,
+			Title:       row.Song.Title,
+			Artist:      row.Song.ArtistName,
+			Album:       row.Song.Album,
+			TrackNumber: row.Song.TrackNumber,
+			IsPublic:    row.Song.IsPublic,
 		})
 	}
 

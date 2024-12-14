@@ -43,6 +43,23 @@ type PlaylistSongRow struct {
 	SongID     int `db:"song_id"`
 }
 
+type PlaylistSongRowWithSong struct {
+	PlaylistID int `db:"playlist_id"`
+	SortOrder  int `db:"sort_order"`
+	SongID     int `db:"song_id"`
+
+	Song struct {
+		ID          int    `db:"id"`
+		ULID        string `db:"ulid"`
+		Title       string `db:"title"`
+		ArtistID    int    `db:"artist_id"`
+		ArtistName  string `db:"artist_name"`
+		Album       string `db:"album"`
+		TrackNumber int    `db:"track_number"`
+		IsPublic    bool   `db:"is_public"`
+	} `db:"song"`
+}
+
 type PlaylistFavoriteRow struct {
 	ID                  int       `db:"id"`
 	PlaylistID          int       `db:"playlist_id"`
