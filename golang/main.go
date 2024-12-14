@@ -30,6 +30,7 @@ const (
 	publicPath        = "./public"
 	sessionCookieName = "listen80_session_golang"
 	anonUserAccount   = "__"
+	maxConnsInt       = 40
 )
 
 var (
@@ -116,9 +117,9 @@ func main() {
 		e.Logger.Fatalf("failed to connect db: %v", err)
 		return
 	}
-	// db.SetMaxOpenConns(25)
-	// db.SetMaxIdleConns(25)
-	db.SetMaxOpenConns(10)
+	db.SetMaxOpenConns(maxConnsInt)
+	db.SetMaxIdleConns(maxConnsInt * 2)
+	db.SetConnMaxLifetime(3 * time.Minute)
 	defer db.Close()
 
 	sessionStore, err = mysqlstore.NewMySQLStoreFromConnection(db.DB, "sessions_golang", "/", 86400, []byte("powawa"))
