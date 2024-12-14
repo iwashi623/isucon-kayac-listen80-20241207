@@ -117,8 +117,9 @@ func main() {
 		return
 	}
 	defer db.Close()
-	db.SetMaxOpenConns(25)
-	db.SetMaxIdleConns(25)
+	// db.SetMaxOpenConns(25)
+	// db.SetMaxIdleConns(25)
+	db.SetMaxOpenConns(10)
 
 	sessionStore, err = mysqlstore.NewMySQLStoreFromConnection(db.DB, "sessions_golang", "/", 86400, []byte("powawa"))
 	if err != nil {
