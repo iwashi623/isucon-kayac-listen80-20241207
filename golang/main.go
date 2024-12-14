@@ -356,7 +356,12 @@ func getFavoritesCountByPlaylistID(ctx context.Context, db connOrTx, playlistID 
 	if err := db.GetContext(
 		ctx,
 		&count,
-		"SELECT IFNULL(count, 0) FROM playlist_favorite_count where playlist_id = ?",
+		`
+			SELECT IFNULL(
+				(SELECT count FROM playlist_favorite_count WHERE playlist_id = ?),
+				0
+			) AS favorite_count;
+		`,
 		playlistID,
 	); err != nil {
 		return 0, fmt.Errorf(
