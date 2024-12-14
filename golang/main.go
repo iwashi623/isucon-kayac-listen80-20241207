@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"html/template"
 	"io"
-	"log/slog"
 	"math/rand"
 	"net/http"
 	"os"
@@ -123,12 +122,12 @@ func main() {
 
 	sessionStore, err = mysqlstore.NewMySQLStoreFromConnection(db.DB, "sessions_golang", "/", 86400, []byte("powawa"))
 	if err != nil {
-		e.Logger.Infof("failed to initialize session store: %v", err)
+		e.Logger.Fatalf("failed to initialize session store: %v", err)
 		return
 	}
 
 	go func() {
-		slog.Info("pprof listening on :6060")
+		e.Logger.Infof("pprof listening on :6060")
 		http.ListenAndServe(":6060", nil)
 	}()
 
