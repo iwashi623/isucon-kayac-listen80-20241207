@@ -123,7 +123,7 @@ func main() {
 
 	sessionStore, err = mysqlstore.NewMySQLStoreFromConnection(db.DB, "sessions_golang", "/", 86400, []byte("powawa"))
 	if err != nil {
-		e.Logger.Fatalf("failed to initialize session store: %v", err)
+		e.Logger.Infof("failed to initialize session store: %v", err)
 		return
 	}
 
