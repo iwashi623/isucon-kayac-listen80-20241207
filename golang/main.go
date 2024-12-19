@@ -428,11 +428,7 @@ func getRecentPlaylistSummaries(ctx context.Context, db connOrTx, userAccount st
 
 	playlists := make([]Playlist, 0, len(allPlaylists))
 	for _, playlist := range allPlaylists {
-		user, err := getUserByAccount(ctx, db, playlist.UserAccount)
-		if err != nil {
-			return nil, fmt.Errorf("error getUserByAccount: %w", err)
-		}
-		if user == nil || user.IsBan {
+		if playlist.User == nil || playlist.User.IsBan {
 			continue
 		}
 
@@ -457,8 +453,8 @@ func getRecentPlaylistSummaries(ctx context.Context, db connOrTx, userAccount st
 		playlists = append(playlists, Playlist{
 			ULID:            playlist.ULID,
 			Name:            playlist.Name,
-			UserDisplayName: user.DisplayName,
-			UserAccount:     user.Account,
+			UserDisplayName: playlist.User.DisplayName,
+			UserAccount:     playlist.User.Account,
 			SongCount:       songCount,
 			FavoriteCount:   favoriteCount,
 			IsFavorited:     isFavorited,

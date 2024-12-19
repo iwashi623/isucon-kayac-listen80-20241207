@@ -46,7 +46,7 @@ type PlaylistRowWithUser struct {
 	CreatedAt   time.Time `db:"created_at"`
 	UpdatedAt   time.Time `db:"updated_at"`
 
-	User struct {
+	User *struct {
 		Account     string    `db:"account"`
 		DisplayName string    `db:"display_name"`
 		IsBan       bool      `db:"is_ban"`
