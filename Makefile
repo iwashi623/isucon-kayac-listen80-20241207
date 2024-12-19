@@ -143,7 +143,7 @@ pbpt3:
 
 .PHONY: getpprof
 getpprof:
-	scp i1:/home/isucon/webapp/cpu-profile.prof ./
+	scp i1:/home/isucon/cpu-profile.prof ./
 	go tool pprof -http 127.0.0.1:9092 ./cpu-profile.prof
 
 .PHONY: upmakefile1

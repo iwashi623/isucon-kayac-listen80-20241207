@@ -2,3 +2,4 @@ public
 node
 mysql/logs/*
 hoge.txt
+cpu-profile.prof

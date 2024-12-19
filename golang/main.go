@@ -367,13 +367,14 @@ func getFavoritesCountByPlaylistID(ctx context.Context, db connOrTx, playlistID 
 		ctx,
 		&count,
 		`
-			SELECT IFNULL(
-				(SELECT count FROM playlist_favorite_count WHERE playlist_id = ?),
-				0
-			) AS favorite_count;
+			SELECT count FROM playlist_favorite_count WHERE playlist_id = ?
 		`,
 		playlistID,
 	); err != nil {
+		if err == sql.ErrNoRows {
+			return 0, nil
+		}
+
 		return 0, fmt.Errorf(
 			"error Get count of playlist_favorite by playlist_id=%d: %w",
 			playlistID, err,
@@ -399,11 +400,21 @@ func getSongsCountByPlaylistID(ctx context.Context, db connOrTx, playlistID int)
 }
 
 func getRecentPlaylistSummaries(ctx context.Context, db connOrTx, userAccount string) ([]Playlist, error) {
-	var allPlaylists []PlaylistRow
+	var allPlaylists []PlaylistRowWithUser
 	if err := db.SelectContext(
 		ctx,
 		&allPlaylists,
-		"SELECT * FROM playlist where is_public = ? ORDER BY created_at DESC LIMIT 200",
+		`
+			SELECT 
+				playlist.*,
+				user.account AS "user.account",
+				user.display_name AS "user.display_name",
+				user.is_ban AS "user.is_ban",
+				user.created_at AS "user.created_at"
+			FROM playlist
+			JOIN user ON playlist.user_account = user.account
+			where is_public = ? ORDER BY playlist.created_at DESC LIMIT 150
+		`,
 		true,
 	); err != nil {
 		return nil, fmt.Errorf(
